@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: clipbot-openai-mcp
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/Sarjeraoss/opencode-with-lucky
+    branch: clipbot/openai-mcp
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    healthCheckPath: /health
+    envVars:
+      - key: BRIDGE_TOKEN
+        sync: false
+      - key: MCP_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: NODE_ENV
+        value: production

@@ -1,18 +1,13 @@
 {
   "port": 8787,
-  "token": "CHANGE_ME_MATCH_FIRMWARE_DEFAULT_BRIDGE_TOKEN",
-  "publicUrl": "https://chat.example.com",
+  "token": "SET_IN_BRIDGE_TOKEN_ENVIRONMENT",
+  "publicUrl": "https://YOUR_HOST",
   "opencodeExe": "opencode",
   "model": {
     "providerID": "opencode",
     "id": "deepseek-v4.1-flash-free"
   },
-  "fallbackModels": [
-    {
-      "providerID": "ollama",
-      "id": "qwen2.5:7b"
-    }
-  ],
+  "fallbackModels": [],
   "rateLimit": {
     "windowMs": 300000,
     "max": 40
