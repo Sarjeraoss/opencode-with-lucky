@@ -1,0 +1,15 @@
+name: Clipbot OpenAI MCP source checks
+on:
+  push:
+    branches: [clipbot/openai-mcp]
+  pull_request:
+    paths: ["bridge/openai-mcp-server.js", "Dockerfile", "render.yaml"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check bridge/openai-mcp-server.js
