@@ -22,31 +22,46 @@ const path = require('path');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 
-let config;
-try {
-  config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-} catch (error) {
-  console.error(`[bridge] Cannot read ${CONFIG_PATH}: ${error.message}`);
-  process.exit(1);
+let config = {};
+if (fs.existsSync(CONFIG_PATH)) {
+  try {
+    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (error) {
+    console.error(`[bridge] Invalid ${CONFIG_PATH}: ${error.message}`);
+    process.exit(1);
+  }
 }
+// Container deployments use environment variables; local Windows can
+// continue using bridge/config.json. No secrets are checked into Git.
+
 
 const PORT = Number(process.env.PORT || config.port || 8787);
 const TOKEN = process.env.BRIDGE_TOKEN || config.token || '';
-const OPENCODE_EXE =
-  process.env.OPENCODE_EXE ||
-  config.opencodeExe ||
-  'C:\\Users\\vikas\\AppData\\Roaming\\npm\\node_modules\\@opencode\\cli\\bin\\opencode.exe';
+const OPENCODE_EXE = process.env.OPENCODE_EXE || config.opencodeExe || 'opencode';
 const TIMEOUT_MS = Number(config.timeoutMs || 120000);
 const DEVICE_CONTROL = (config.deviceControl && config.deviceControl.enabled)
   ? config.deviceControl
   : null;
-const PRIMARY = config.model || { providerID: 'ollama', id: 'qwen2.5:7b' };
-const FALLBACKS = Array.isArray(config.fallbackModels) ? config.fallbackModels : [];
+const PRIMARY = {
+  providerID: process.env.OPENCODE_PROVIDER_ID || (config.model && config.model.providerID) || 'opencode',
+  id: process.env.OPENCODE_MODEL_ID || (config.model && config.model.id) || 'deepseek-v4.1-flash-free',
+};
+// Local Ollama models are not available on a generic cloud host unless
+// explicitly provisioned. Avoid accidental fallback to somebody else's PC.
+const FALLBACKS = process.env.DISABLE_LOCAL_FALLBACK === '1'
+  ? [] : (Array.isArray(config.fallbackModels) ? config.fallbackModels : []);
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_PROMPT_CHARS = 24000;
 const COOLDOWN_DEFAULT_MS = 10 * 60 * 1000;
 const COOLDOWN_MAX_MS = 24 * 60 * 60 * 1000;
 const startedAt = Date.now();
+
+// Require an explicit secret in any deployment. The public health endpoint
+// remains available, but /chat and /register must be authenticated.
+if (TOKEN.length < 24 || TOKEN.startsWith('CHANGE_ME_')) {
+  console.error('[bridge] Set BRIDGE_TOKEN to a unique secret of at least 24 characters.');
+  process.exit(1);
+}
 
 // Public-facing abuse controls. The bridge is reachable from the internet once
 // the Cloudflare tunnel is up, so every request costs someone real CPU.
@@ -58,6 +73,8 @@ const DEVICE_TTL_MS = 20 * 60 * 1000;
 // cooldown expires, so every chat message does not pay for a failed attempt.
 const modelCooldowns = new Map();
 let lastUsedModel = null;
+let lastModelError = null;
+let lastModelErrorAt = null;
 
 // Last known LAN address of the board, refreshed by POST /register.
 let device = null;
@@ -474,10 +491,14 @@ async function generate(prompt) {
       const result = await callOpenCode(prompt, model);
       log(`[model] ok ${key} (${result.text.length} chars)`);
       lastUsedModel = key;
+      lastModelError = null;
+      lastModelErrorAt = null;
       return result;
     } catch (error) {
       lastError = error;
-      log(`[model] failed ${key}: ${error.message}`);
+      lastModelError = String(error.message || 'Unknown OpenCode error').slice(0, 500);
+      lastModelErrorAt = new Date().toISOString();
+      log(`[model] failed ${key}: ${lastModelError}`);
 
       if (/rate.?limit|free usage limit|quota|429/i.test(error.message) || error.retryAfterMs) {
         const duration = setCooldown(model, error);
@@ -569,6 +590,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/diagnostics') {
+    if (req.headers['x-bridge-token'] !== TOKEN) {
+      sendJson(res, 401, { error: 'Invalid bridge token' });
+      return;
+    }
+    sendJson(res, 200, {
+      ok: true,
+      primary: modelKey(PRIMARY),
+      fallbacks: FALLBACKS.map(modelKey),
+      lastUsedModel,
+      lastModelError,
+      lastModelErrorAt,
+      activeChat: chatInFlight,
+      uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    });
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/where') {
     sendJson(res, 200, {
       registered: Boolean(device),
@@ -582,7 +621,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/register') {
-    if (TOKEN && req.headers['x-bridge-token'] !== TOKEN) {
+    if (req.headers['x-bridge-token'] !== TOKEN) {
       sendJson(res, 401, { error: 'Invalid bridge token' });
       return;
     }
@@ -620,7 +659,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/chat') {
-    if (TOKEN && req.headers['x-bridge-token'] !== TOKEN) {
+    if (req.headers['x-bridge-token'] !== TOKEN) {
       sendJson(res, 401, { error: 'Invalid bridge token' });
       return;
     }
