@@ -1,0 +1,19 @@
+name: Clipbot bridge source validation
+on:
+  push:
+    branches: [clipbot/cloud-bridge]
+  pull_request:
+    paths:
+      - "bridge/server.js"
+      - "render.yaml"
+      - "Dockerfile"
+      - ".github/workflows/clipbot-bridge.yml"
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check bridge/server.js
