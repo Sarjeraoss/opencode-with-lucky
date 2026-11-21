@@ -79,3 +79,83 @@ already supports the OpenCode `POST /chat` protocol.
 - This change does **not** implement spoken answers or TTS.
 - Continuous cloud operation requires an always-on hosted runtime,
   internet connectivity, and a working model provider.
+
+## Deploy on Render (Blueprint)
+
+A `render.yaml` and `Dockerfile` are included in this branch. Open
+https://dashboard.render.com/blueprints and create a Blueprint from
+`Sarjeraoss/opencode-with-lucky` branch `clipbot/cloud-bridge`.
+
+The Blueprint specifies a Docker web service in Singapore, with
+`/health` as its health check. The free instance is for experimentation:
+it can spin down when inactive and may not be suitable for reliable,
+low-latency Clipbot voice interaction. Check Render's current plan
+availability/pricing before selecting an instance.
+
+Set the secret `BRIDGE_TOKEN` when prompted by Render. Generate an
+unpredictable value of **at least 24 characters** with a password manager.
+Never reuse the public example token. This secret must match Lucy's
+stored OpenCode bridge token, and must not be put into GitHub.
+
+### AI provider state
+
+The deployment intentionally starts with `PROVIDER_CONFIGURED=false`.
+`/health` can return `ok:true` while `/chat` returns HTTP 503 with an
+explicit "provider not configured" error. This is intentional; it avoids
+hiding the distinction between a healthy bridge and functioning AI.
+
+The Docker image installs the current `@opencode/cli`. The *original*
+bridge calls `opencode api post /api/experimental/generate/text`.
+OpenCode has changed over time and that experimental API has **not been
+validated against the installed CLI**. If a chat returns 502 after
+configuration, inspect `/diagnostics` and Render logs. A code update may
+be needed to migrate to the current supported OpenCode API.
+
+To enable AI, you need a model/provider account with permitted cloud
+access. Configure its credentials as secret environment variables on
+Render, using the exact variable names required by that provider and
+your installed OpenCode version. Test model access in that environment,
+then set `PROVIDER_CONFIGURED=true`. The example model name
+`deepseek-v4.1-flash-free` is **not** proof of current free access;
+verify its availability on your account. No API key or subscription
+is assumed or provided here.
+
+For a hosted deployment without Ollama, keep
+`DISABLE_LOCAL_FALLBACK=1`. A local Windows Ollama process is not
+available inside a Render container. Select a single hosted model you
+are authorized to use.
+
+### Test via Windows PowerShell
+
+After Render gives you a public address, open
+`https://YOUR-SERVICE.onrender.com/health`.
+Then send a request from PowerShell, entering the token privately:
+
+```powershell
+$token = Read-Host "Bridge token"
+$body = @{messages=@(@{role="user";content="Reply with exactly READY"})} |
+  ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "https://YOUR-SERVICE.onrender.com/chat" `
+  -Method Post -Headers @{"X-Bridge-Token"=$token} `
+  -ContentType "application/json" -Body $body -TimeoutSec 120
+```
+
+With `PROVIDER_CONFIGURED=false`, expect HTTP 503. After a working
+model is configured, expect a JSON response with `reply` and `model`.
+Do not point Clipbot at the new bridge until the PowerShell test succeeds.
+
+On Lucy's existing settings page, set its Online AI base URL to the
+Render HTTPS address without `/chat`, then enter the same bridge
+token. Lucy already implements `POST /chat`; you do not need another
+ESP32 upload solely to change the server address.
+
+### Important boundaries
+
+- The Render service and its OpenCode runtime are separate from the
+  ESP32 and from the original `chat.blueflutex.in` host.
+- This deployment does not implement audio/TTS; Clipbot's speech
+  service remains separately configured.
+- Only source and deployment files are prepared. You must authorize
+  Render access and create the web service yourself.
+- The current OpenCode CLI experimental API compatibility and actual
+  model responses are not yet end-to-end verified.

@@ -38,6 +38,7 @@ if (fs.existsSync(CONFIG_PATH)) {
 const PORT = Number(process.env.PORT || config.port || 8787);
 const TOKEN = process.env.BRIDGE_TOKEN || config.token || '';
 const OPENCODE_EXE = process.env.OPENCODE_EXE || config.opencodeExe || 'opencode';
+const PROVIDER_CONFIGURED = process.env.PROVIDER_CONFIGURED === 'true';
 const TIMEOUT_MS = Number(config.timeoutMs || 120000);
 const DEVICE_CONTROL = (config.deviceControl && config.deviceControl.enabled)
   ? config.deviceControl
@@ -572,6 +573,7 @@ const server = http.createServer(async (req, res) => {
       model: modelKey(PRIMARY),
       fallbackModels: FALLBACKS.map(modelKey),
       lastUsedModel,
+      providerConfigured: PROVIDER_CONFIGURED,
       cooldowns: [...modelCooldowns.entries()]
         .filter(([, until]) => until > now)
         .map(([model, until]) => ({ model, secondsRemaining: Math.ceil((until - now) / 1000) })),
@@ -602,6 +604,7 @@ const server = http.createServer(async (req, res) => {
       lastUsedModel,
       lastModelError,
       lastModelErrorAt,
+      providerConfigured: PROVIDER_CONFIGURED,
       activeChat: chatInFlight,
       uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
     });
@@ -661,6 +664,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/chat') {
     if (req.headers['x-bridge-token'] !== TOKEN) {
       sendJson(res, 401, { error: 'Invalid bridge token' });
+      return;
+    }
+
+    if (!PROVIDER_CONFIGURED) {
+      sendJson(res, 503, { error: 'AI provider is not configured. Set provider credentials on Render, verify OpenCode model access, and set PROVIDER_CONFIGURED=true.' });
       return;
     }
 
@@ -745,8 +753,8 @@ server.listen(PORT, '0.0.0.0', () => {
 
   setInterval(pruneRateBuckets, 60 * 1000).unref();
 
-  // Warm up the preferred model so the first chat reply is fast.
-  setTimeout(() => {
+  // Only warm up when the provider has explicitly been configured.
+  if (PROVIDER_CONFIGURED) setTimeout(() => {
     log('[warmup] loading model...');
     generate('Reply with exactly: OK')
       .then(() => log('[warmup] model ready'))

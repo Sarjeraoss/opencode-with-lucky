@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: clipbot-opencode-bridge
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/Sarjeraoss/opencode-with-lucky
+    branch: clipbot/cloud-bridge
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BRIDGE_TOKEN
+        sync: false
+      - key: DISABLE_LOCAL_FALLBACK
+        value: "1"
+      - key: PROVIDER_CONFIGURED
+        value: "false"
+      - key: OPENCODE_PROVIDER_ID
+        value: opencode
+      - key: OPENCODE_MODEL_ID
+        value: deepseek-v4.1-flash-free
